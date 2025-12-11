@@ -1,0 +1,7 @@
+{
+  "name": "Copy of 光隙",
+  "description": "一个3D互动体验，你需要通过手势控制数字鸟群穿越未来赛博城市，躲避光束障碍。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
