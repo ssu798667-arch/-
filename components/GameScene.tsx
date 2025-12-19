@@ -13,12 +13,12 @@ const SPEED = 40;
 const NUM_BUILDINGS = 160;
 const BUILDING_RANGE = 300;
 const FLOCK_COUNT = 16;
-// Phase 1 Laser Config
-const LASER_SPAWN_INTERVAL_MIN_P1 = 400; // Increased density
-const LASER_SPAWN_INTERVAL_MAX_P1 = 800;
-// Phase 2 Laser Config
-const LASER_SPAWN_INTERVAL_MIN_P2 = 500;
-const LASER_SPAWN_INTERVAL_MAX_P2 = 1000;
+// Phase 1 Laser Config - Increased Density
+const LASER_SPAWN_INTERVAL_MIN_P1 = 300; 
+const LASER_SPAWN_INTERVAL_MAX_P1 = 600;
+// Phase 2 Laser Config - Increased Density
+const LASER_SPAWN_INTERVAL_MIN_P2 = 400;
+const LASER_SPAWN_INTERVAL_MAX_P2 = 700;
 
 const LASER_SPEED = 60;
 
@@ -66,7 +66,60 @@ const BirdMaterial = shaderMaterial(
   `
 );
 
-extend({ BirdMaterial });
+// --- Custom Particle Shader Material ---
+const ParticleMaterial = shaderMaterial(
+  {
+    time: 0,
+    speed: SPEED,
+  },
+  // Vertex Shader
+  `
+    uniform float time;
+    uniform float speed;
+    attribute float aSpeed;
+    attribute float aSize;
+    attribute vec3 aColor;
+    varying vec3 vColor;
+    
+    void main() {
+      vColor = aColor;
+      vec3 pos = position;
+      
+      // Endless loop simulation moving +Z (towards camera) relative to world origin logic
+      // Actually standard logic here: Camera is fixed, world moves +Z. 
+      // So particles should also move +Z.
+      
+      float zRange = 400.0;
+      // Offset time by random start pos.z effectively? 
+      // We take initial pos.z, add speed*time, then modulo.
+      
+      float zCurrent = mod(pos.z + (speed + aSpeed) * time, zRange);
+      pos.z = zCurrent - 200.0; // Keep them centered around the scene depth
+      
+      vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+      
+      // Size attenuation
+      gl_PointSize = aSize * (80.0 / -mvPosition.z);
+      
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  // Fragment Shader
+  `
+    varying vec3 vColor;
+    void main() {
+      // Soft circular particle
+      vec2 coord = gl_PointCoord - vec2(0.5);
+      float r = length(coord) * 2.0;
+      if (r > 1.0) discard;
+      
+      float glow = 1.0 - pow(r, 1.5);
+      gl_FragColor = vec4(vColor, glow);
+    }
+  `
+);
+
+extend({ BirdMaterial, ParticleMaterial });
 
 // --- Camera Controller ---
 const CameraRig: React.FC = () => {
@@ -94,6 +147,68 @@ const CameraRig: React.FC = () => {
   });
   
   return null;
+};
+
+// --- Atmosphere Particles ---
+const AtmosphereParticles: React.FC = () => {
+  const count = 1000;
+  // @ts-ignore
+  const materialRef = useRef<THREE.ShaderMaterial>(null);
+
+  const { positions, colors, sizes, speeds } = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+    const siz = new Float32Array(count);
+    const spd = new Float32Array(count);
+
+    const palette = [
+      new THREE.Color('#0ea5e9'), // Sky Blue
+      new THREE.Color('#22d3ee'), // Cyan
+      new THREE.Color('#818cf8'), // Indigo
+      new THREE.Color('#ffffff'), // White
+    ];
+
+    for (let i = 0; i < count; i++) {
+      // Spread wide X and Y, deep Z
+      pos[i * 3] = (Math.random() - 0.5) * 100;     // x
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 80;  // y
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 400; // z initial
+      
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+      
+      siz[i] = Math.random() * 3.0 + 1.0;
+      spd[i] = Math.random() * 20.0;
+    }
+
+    return { positions: pos, colors: col, sizes: siz, speeds: spd };
+  }, []);
+
+  useFrame((state) => {
+    if (materialRef.current) {
+      materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+    }
+  });
+
+  return (
+    <points>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
+        <bufferAttribute attach="attributes-aColor" count={count} array={colors} itemSize={3} />
+        <bufferAttribute attach="attributes-aSize" count={count} array={sizes} itemSize={1} />
+        <bufferAttribute attach="attributes-aSpeed" count={count} array={speeds} itemSize={1} />
+      </bufferGeometry>
+      {/* @ts-ignore */}
+      <particleMaterial 
+        ref={materialRef} 
+        transparent 
+        depthWrite={false} 
+        blending={THREE.AdditiveBlending} 
+      />
+    </points>
+  );
 };
 
 // --- City Component (Phase 1 Buildings) ---
@@ -697,6 +812,8 @@ const GameScene: React.FC = () => {
         {/* Game Objects */}
         <City />
         <CityFloor />
+        {/* Removed CityTraffic */}
+        <AtmosphereParticles />
         <Flock />
         <ObstacleManager />
         
